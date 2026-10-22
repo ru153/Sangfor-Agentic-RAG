@@ -1,0 +1,17 @@
+# 环境变量与密钥 (绝对不能传)
+.env
+
+# 本地数据库和生成的报表 (传上去会乱套)
+agent_memory.db
+报名信息表.csv
+*.sqlite3
+
+# 本地知识库文件 (太大，传上去容易失败)
+faiss_index/
+bm25_retriever.pkl
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/

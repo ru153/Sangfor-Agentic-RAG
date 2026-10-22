@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>深信服训练营 Agentic RAG</title>
+    <style>
+        :root { --primary: #1890ff; --bg: #f0f2f5; --border: #d9d9d9; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); height: 100vh; display: flex; flex-direction: column; }
+
+        /* 顶部导航 */
+        .header { background: #fff; padding: 15px 24px; box-shadow: 0 1px 4px rgba(0,21,41,.08); display: flex; justify-content: space-between; align-items: center; z-index: 10; }
+        .header h1 { margin: 0; font-size: 18px; color: #333; }
+        .header a { color: var(--primary); text-decoration: none; font-size: 14px; font-weight: 500; }
+        .header a:hover { text-decoration: underline; }
+
+        /* 角色切换开关 */
+        .role-switch { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #666; }
+        .role-switch select { padding: 5px 10px; border-radius: 4px; border: 1px solid #ccc; outline: none; cursor: pointer; }
+
+        /* 主体布局 */
+        .main-container { display: flex; flex: 1; overflow: hidden; padding: 20px; gap: 20px; }
+
+        /* 左侧聊天区 */
+        .chat-panel { flex: 1; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        .chat-history { flex: 1; padding: 20px; overflow-y: auto; }
+
+        .message { margin-bottom: 20px; display: flex; flex-direction: column; }
+        .message.user { align-items: flex-end; }
+        .message.bot { align-items: flex-start; }
+        .bubble { max-width: 80%; padding: 12px 16px; border-radius: 8px; line-height: 1.5; font-size: 14px; }
+        .message.user .bubble { background: var(--primary); color: #fff; border-bottom-right-radius: 2px; }
+        .message.bot .bubble { background: #f4f4f5; color: #333; border-bottom-left-radius: 2px; border: 1px solid var(--border); }
+
+        .input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: #fff; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+        .input-area input { flex: 1; padding: 10px 15px; border: 1px solid var(--border); border-radius: 6px; outline: none; font-size: 14px; }
+        .input-area input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
+        .input-area button { padding: 10px 20px; background: var(--primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: 0.2s; }
+        .input-area button:hover { background: #40a9ff; }
+        .input-area button:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* 右侧轨迹区 */
+        .trace-panel { width: 400px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+        .trace-header { padding: 12px 15px; background: #2d2d2d; color: #ccc; font-size: 13px; font-weight: bold; border-bottom: 1px solid #444; display: flex; justify-content: space-between; align-items: center; }
+        .trace-content { flex: 1; padding: 15px; overflow-y: auto; color: #d4d4d4; font-family: "Courier New", Courier, monospace; font-size: 13px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
+
+        /* 语法高亮 */
+        .key { color: #9cdcfe; }
+        .string { color: #ce9178; }
+        .number { color: #b5cea8; }
+        .boolean { color: #569cd6; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🛡️ 深信服训练营 Agentic RAG 控制台</h1>
+        <div class="role-switch">
+            <label for="role-select">当前身份:</label>
+            <select id="role-select">
+                <option value="guest">普通访客 (Guest)</option>
+                <option value="admin">管理员 / HR (Admin)</option>
+            </select>
+            <a href="/docs" target="_blank" style="margin-left: 15px;">📚 API 文档</a>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- 左侧聊天区 -->
+        <div class="chat-panel">
+            <div class="chat-history" id="chat-history">
+                <div class="message bot">
+                    <div class="bubble">你好！我是训练营咨询助手。你可以问我关于时间、费用、课程、报名流程的问题。</div>
+                </div>
+            </div>
+            <div class="input-area">
+                <input type="text" id="query-input" placeholder="输入你的问题... (按回车发送)" onkeypress="handleEnter(event)">
+                <button id="send-btn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
+
+        <!-- 右侧轨迹区 -->
+        <div class="trace-panel">
+            <div class="trace-header">
+                <span>⚙️ 底层运行轨迹 (Execution Trace)</span>
+            </div>
+            <div class="trace-content" id="trace-content">// 等待发送消息...</div>
+        </div>
+    </div>
+
+    <script>
+        // 保证每个浏览器标签页有一个独立的会话记忆
+        const threadId = "web_" + Math.random().toString(36).substring(7);
+        const chatHistory = document.getElementById('chat-history');
+        const traceContent = document.getElementById('trace-content');
+        const queryInput = document.getElementById('query-input');
+        const sendBtn = document.getElementById('send-btn');
+        const roleSelect = document.getElementById('role-select'); // 获取角色选择框
+
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        // 简单的语法高亮函数
+        function syntaxHighlight(json) {
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                let cls = 'number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) cls = 'key';
+                    else cls = 'string';
+                } else if (/true|false/.test(match)) cls = 'boolean';
+                else if (/null/.test(match)) cls = 'boolean';
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.innerHTML = `<div class="bubble">${text.replace(/\n/g, '<br>')}</div>`;
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // 获取当前下拉框选中的角色
+            const currentRole = roleSelect.value;
+
+            // 1. 重置 UI
+            queryInput.value = '';
+            sendBtn.disabled = true;
+            sendBtn.innerText = '思考中...';
+            addMessage('user', query);
+            traceContent.innerHTML = "// Agent 正在运行，请稍候...";
+
+            // 2. 发起请求
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        thread_id: threadId,
+                        user_role: currentRole  // 🚨 将角色传给后端
+                    })
+                });
+
+                if (!response.ok) throw new Error('网络请求失败');
+
+                const data = await response.json();
+
+                // 3. 渲染聊天回答
+                addMessage('bot', data.answer);
+
+                // 4. 渲染右侧的轨迹 JSON
+                if (data.execution_trace) {
+                    const traceStr = JSON.stringify(data.execution_trace, null, 2);
+                    traceContent.innerHTML = syntaxHighlight(traceStr);
+                }
+
+            } catch (error) {
+                addMessage('bot', '❌ 系统错误，请检查后台终端是否报错。');
+                traceContent.innerText = error.toString();
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerText = '发送';
+                queryInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>
